@@ -7,14 +7,48 @@ function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  // 1. Nuevo estado para guardar el rol
+  const [userRole, setUserRole] = useState<string | null>(null);
+
+  // 2. Nueva función para buscar el rol en la base de datos
+  const fetchUserRole = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('perfiles')
+        .select('rol')
+        .eq('id', userId)
+        .single();
+
+      if (error) {
+        console.error("Error buscando el rol:", error);
+        return;
+      }
+      
+      if (data) {
+        setUserRole(data.rol);
+        console.log("Rol cargado exitosamente:", data.rol);
+      }
+    } catch (err) {
+      console.error("Error inesperado al buscar rol:", err);
+    }
+  };
 
   useEffect(() => {
+    // 3. Modificamos el useEffect para que busque el rol cuando hay sesión
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      if (session?.user?.id) {
+        fetchUserRole(session.user.id);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      if (session?.user?.id) {
+        fetchUserRole(session.user.id);
+      } else {
+        setUserRole(null); // Limpiamos el rol si cierra sesión
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -39,7 +73,8 @@ function App() {
   };
 
   if (session) {
-    return <Dashboard session={session} />;
+    // 4. Le pasamos el userRole al Dashboard para que pueda usarlo
+    return <Dashboard session={session} userRole={userRole} />;
   }
 
   return (
