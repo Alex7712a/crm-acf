@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import NuevoProspectoModal from './NuevoProspectoModal';
 import EditarEstadoModal from './EditarEstadoModal';
-import HistorialExcel from './HistorialExcel'; // IMPORTAMOS LA NUEVA PANTALLA
+import HistorialExcel from './HistorialExcel';
 
 interface Prospecto {
   id: string;
@@ -10,8 +10,8 @@ interface Prospecto {
   telefono: string;
   nacionalidad: string;
   estado: string;
-  tipo_tramite: string;
-  modalidad_cita: string;
+  tipo_tramite?: string;
+  modalidad_cita?: string | null;
 }
 
 export default function TableroKanban() {
@@ -22,7 +22,6 @@ export default function TableroKanban() {
   const [prospectoSeleccionado, setProspectoSeleccionado] = useState<Prospecto | null>(null);
   const [rolUsuario, setRolUsuario] = useState<string | null>(null);
 
-  // NUEVO: Variable para cambiar entre el Tablero y el Historial
   const [vistaActual, setVistaActual] = useState<'tablero' | 'historial'>('tablero');
 
   const columnas = [
@@ -90,12 +89,10 @@ export default function TableroKanban() {
     </div>
   );
 
-  // SI LA VISTA ESTÁ EN HISTORIAL, MOSTRAMOS LA PANTALLA NUEVA
   if (vistaActual === 'historial') {
     return <HistorialExcel onVolver={() => setVistaActual('tablero')} />;
   }
 
-  // SI NO, MOSTRAMOS EL TABLERO KANBAN NORMAL
   return (
     <div className="p-6 flex flex-col h-full bg-slate-50">
       <div className="flex justify-between items-end mb-6">
@@ -111,7 +108,7 @@ export default function TableroKanban() {
         <div className="flex gap-3">
           {rolUsuario === 'admin' && (
             <button 
-              onClick={() => setVistaActual('historial')} // AQUÍ CONECTAMOS EL BOTÓN VERDE
+              onClick={() => setVistaActual('historial')}
               className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:bg-emerald-700 transition-colors border border-emerald-800 flex items-center gap-2"
             >
               📊 Ver Historial Excel
@@ -168,16 +165,16 @@ export default function TableroKanban() {
                       <div className="flex justify-between items-center mb-3 mt-1">
                         <p className="text-sm text-slate-500 font-medium">📞 {prospecto.telefono || 'S/N'}</p>
                         <p className="text-xs font-bold text-slate-400 flex items-center gap-1">
-                          {prospecto.nacionalidad === 'Mexicana' ? '🇲🇽' : '🌍'} {prospecto.nacionalidad}
+                          {prospecto.nacionalidad === 'Mexicana' ? '🇲🇽' : '🌍'} {prospecto.nacionalidad || 'General'}
                         </p>
                       </div>
                       
                       <div className="flex gap-2 flex-wrap">
                         <span className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-md uppercase tracking-wider">
-                          {prospecto.tipo_tramite}
+                          {prospecto.tipo_tramite || 'General'}
                         </span>
                         <span className="text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 px-2 py-1 rounded-md uppercase tracking-wider">
-                          {prospecto.modalidad_cita.replace('_', ' ')}
+                          {(prospecto.modalidad_cita || 'Sin modalidad').replace('_', ' ')}
                         </span>
                       </div>
                     </div>

@@ -34,23 +34,20 @@ export default function EditarEstadoModal({ isOpen, onClose, prospecto, onActual
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // ==========================================
-    // NUEVA VALIDACIÓN DE NEGOCIO (SEMANA 9)
-    // ==========================================
-    // Si intenta pasarlo a etapas avanzadas pero los documentos siguen pendientes
+    // Validación de negocio (Semana 9/10)
     const etapasAvanzadas = ['Primer_Pago', 'Seguimiento', 'Cita_Cierre', 'Finalizado'];
     const documentosPendientes = estatusDocs === 'Pendientes';
 
     if (etapasAvanzadas.includes(estado) && documentosPendientes) {
       alert("⚠️ Validación del Sistema:\nNo puedes avanzar al prospecto a esta etapa si los documentos siguen marcados como 'Aún no envía documentos'. Por favor actualiza el estatus documental primero.");
-      return; // Detiene el guardado
+      return;
     }
-    // ==========================================
 
     setGuardando(true);
 
     try {
-      const { error } = await supabase
+      // 1. Actualizamos el prospecto en la tabla principal
+      const { error: updateError } = await supabase
         .from('prospectos')
         .update({ 
           estado: estado,
@@ -61,7 +58,31 @@ export default function EditarEstadoModal({ isOpen, onClose, prospecto, onActual
         })
         .eq('id', prospecto.id);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
+
+      // 2. AUTOMATIZACIÓN: Si el estado cambia a 'Finalizado', lo copiamos al Historial Excel
+      if (estado === 'Finalizado') {
+        const { error: historialError } = await supabase
+          .from('historial_clientes')
+          .insert([
+            {
+              nombre_cliente: prospecto.nombre_cliente,
+              telefono: prospecto.telefono || 'S/N',
+              nacionalidad: prospecto.nacionalidad || 'Mexicana',
+              tipo_tramite: prospecto.tipo_tramite || 'Visa de Turista',
+              tipo_paquete: prospecto.tipo_paquete || 'Completo',
+              resultado: resultadoTramite === 'Aprobado' ? 'Aprobado' : 'Denegado / No Exitoso',
+              notas: `Trámite finalizado desde el CRM. Resultado de Visa: ${resultadoTramite}. Pago: ${estatusPago}`
+            }
+          ]);
+
+        if (historialError) {
+          console.error("Error al pasar al historial:", historialError);
+          alert("Se actualizó el prospecto, pero hubo un detalle al pasarlo al Historial Excel. Revisa la consola.");
+        } else {
+          alert("🎉 ¡Trámite concluido con éxito! El cliente ha sido registrado automáticamente en el Historial Excel.");
+        }
+      }
       
       onActualizado();
     } catch (error: any) {
@@ -102,9 +123,7 @@ export default function EditarEstadoModal({ isOpen, onClose, prospecto, onActual
             </select>
           </div>
 
-          {/* ----- LÓGICA INTELIGENTE ----- */}
-
-          {/* 1. SECCIÓN DE DOCUMENTOS (Solo se ve al inicio) */}
+          {/* 1. SECCIÓN DE DOCUMENTOS */}
           {(estado === 'Nuevos' || estado === 'Asesoria') && (
             <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 animate-fade-in">
               <label className="block text-sm font-bold text-amber-900">📋 Recepción de Documentos:</label>
@@ -118,7 +137,7 @@ export default function EditarEstadoModal({ isOpen, onClose, prospecto, onActual
             </div>
           )}
 
-          {/* 2. SECCIÓN DE PAGOS (Se ve a la mitad del proceso) */}
+          {/* 2. SECCIÓN DE PAGOS */}
           {(estado === 'Primer_Pago' || estado === 'Seguimiento') && (
             <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 animate-fade-in">
               <label className="block text-sm font-bold text-emerald-900">💰 Estatus Financiero:</label>
@@ -132,7 +151,7 @@ export default function EditarEstadoModal({ isOpen, onClose, prospecto, onActual
             </div>
           )}
 
-          {/* 3. SECCIÓN DE CITAS (Se ve casi al final) */}
+          {/* 3. SECCIÓN DE CITAS */}
           {(estado === 'Cita_Cierre') && (
             <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 animate-fade-in">
               <label className="block text-sm font-bold text-blue-900">📅 Estatus de la Cita:</label>
@@ -146,15 +165,15 @@ export default function EditarEstadoModal({ isOpen, onClose, prospecto, onActual
             </div>
           )}
 
-          {/* 4. SECCIÓN DE RESULTADO FINAL (Se ve en la última columna) */}
+          {/* 4. SECCIÓN DE RESULTADO FINAL (Con Visa Aprobada o Denegada) */}
           {(estado === 'Finalizado') && (
             <div className="bg-purple-50 p-4 rounded-xl border border-purple-200 animate-fade-in">
-              <label className="block text-sm font-bold text-purple-900">🏆 Resultado del Trámite:</label>
+              <label className="block text-sm font-bold text-purple-900">🏆 Resultado de la Visa / Trámite:</label>
               <select value={resultadoTramite} onChange={e => setResultadoTramite(e.target.value)} 
                 className="w-full border border-purple-300 p-2.5 rounded-xl mt-2 outline-none shadow-sm bg-white font-medium text-slate-700">
-                <option value="En_Proceso">⏳ Esperando confirmación del cliente</option>
-                <option value="Aprobado">🎉 Trámite Exitoso (El cliente confirmó)</option>
-                <option value="Rechazado">❌ Trámite No Realizado / Sin Éxito</option>
+                <option value="En_Proceso">⏳ Esperando confirmación</option>
+                <option value="Aprobado">🎉 Visa Aprobada (Éxito)</option>
+                <option value="Denegado">❌ Visa Denegada / Rechazada</option>
               </select>
             </div>
           )}
@@ -164,7 +183,7 @@ export default function EditarEstadoModal({ isOpen, onClose, prospecto, onActual
               className="px-5 py-2.5 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors">Cancelar</button>
             <button type="submit" disabled={guardando} 
               className="px-5 py-2.5 bg-[#fa0101] text-white rounded-xl font-bold hover:bg-[#d00000] shadow-md transition-colors disabled:bg-red-300">
-              {guardando ? '⏳ Guardando...' : '✅ Actualizar Cliente'}
+              {guardando ? '⏳ Guardando...' : '✅ Actualizar y Finalizar'}
             </button>
           </div>
         </form>
