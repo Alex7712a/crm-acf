@@ -74,13 +74,30 @@ export default function NuevoProspectoModal({ isOpen, onClose, onGuardado }: Pro
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("No hay sesión activa");
 
-      // 🎯 LÓGICA CORREGIDA: 
-      // Si confirma que SÍ quiere iniciar, va al Kanban ("Contactos / Informes").
-      // Si está "Analizando" (lo va a pensar), le asignamos un estado de pausa o de agenda para que NO sature el Kanban principal.
-      const estadoEtapa = estatusDecision === 'Confirmado_SI' ? 'Contactos / Informes' : 'En Pausa / Agenda';
+      // Obtener nombre del vendedor logueado para el Dashboard de indicadores
+      const { data: perfilActual } = await supabase
+        .from('perfiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      const vendedorNombre =
+        perfilActual?.nombre_completo ||
+        perfilActual?.nombre ||
+        session.user.email ||
+        'Usuario ACF';
+
+      // Asignación de etapa según calificación inicial
+      const estadoEtapa =
+        estatusDecision === 'Confirmado_SI'
+          ? 'Contactos / Informes'
+          : estatusDecision === 'No_Interesado'
+          ? 'No_Interesado'
+          : 'En Pausa / Agenda';
+
       const paisFinal = paisOrigen === 'Otro' ? paisPersonalizado.trim() || 'Otro' : paisOrigen;
 
-      let datosAInsertar: any = {};
+      let datosAInsertar: Record<string, unknown> = {};
 
       if (tipoModelo === 'familiar_usa') {
         const nombreCompletoUsa = `${nombreUsa.trim()} ${apellidosUsa.trim()}`.trim();
@@ -88,6 +105,7 @@ export default function NuevoProspectoModal({ isOpen, onClose, onGuardado }: Pro
 
         datosAInsertar = {
           vendedor_id: session.user.id,
+          vendedor_nombre: vendedorNombre,
           nombre_cliente: `🇺🇸 ${nombreCompletoUsa} (Trae a ${parentescoFamiliar}: ${nombreCompletoFam})`,
           telefono: telefonoUsa,
           nacionalidad: `${paisFinal} (${ubicacionDetalle || 'N/A'})`,
@@ -106,6 +124,7 @@ export default function NuevoProspectoModal({ isOpen, onClose, onGuardado }: Pro
 
         datosAInsertar = {
           vendedor_id: session.user.id,
+          vendedor_nombre: vendedorNombre,
           nombre_cliente: nombreCompletoDirecto,
           telefono: telefonoDirecto,
           nacionalidad: 'Mexicana',
@@ -125,21 +144,37 @@ export default function NuevoProspectoModal({ isOpen, onClose, onGuardado }: Pro
 
       if (error) throw error;
 
-      // Registrar actividad para la Agenda de Recordatorios
+      // Registrar actividad inicial en bitácora
       if (prospectoCreado) {
+        const tipoInteraccion =
+          estatusDecision === 'Confirmado_SI'
+            ? 'Inicio de Trámite'
+            : estatusDecision === 'No_Interesado'
+            ? 'Descartado / No interesado'
+            : 'Lo va a pensar';
+
+        const detalleDefault =
+          estatusDecision === 'Confirmado_SI'
+            ? 'Confirmó de inmediato.'
+            : estatusDecision === 'No_Interesado'
+            ? 'El contacto indicó que no está interesado por el momento.'
+            : 'Quedó pendiente de analizar con su familia.';
+
         await supabase.from('actividades').insert([
           {
             prospecto_id: prospectoCreado.id,
-            tipo_interaccion: estatusDecision === 'Confirmado_SI' ? 'Inicio de Trámite' : 'Lo va a pensar',
+            tipo_interaccion: tipoInteraccion,
             fecha_interaccion: new Date().toISOString().split('T')[0],
-            detalles: notas.trim() || (estatusDecision === 'Confirmado_SI' ? 'Confirmó de inmediato.' : 'Quedó pendiente de analizar con su familia.'),
-            proximo_recontacto: fechaRecontacto || null
+            detalles: notas.trim() || detalleDefault,
+            proximo_recontacto: estatusDecision === 'Analizando' ? fechaRecontacto || null : null
           }
         ]);
       }
 
       if (estatusDecision === 'Confirmado_SI') {
         alert("🎉 ¡Prospecto registrado con éxito en el Flujo Comercial (Kanban)!");
+      } else if (estatusDecision === 'No_Interesado') {
+        alert("ℹ️ Prospecto registrado como No interesado (reflejado en tus indicadores del Dashboard).");
       } else {
         alert("📅 Prospecto guardado. Como quedó analizando, se ha enviado directamente a la Agenda de Recordatorios.");
       }
@@ -151,9 +186,10 @@ export default function NuevoProspectoModal({ isOpen, onClose, onGuardado }: Pro
 
       onGuardado();
       onClose();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const mensaje = error instanceof Error ? error.message : 'Error desconocido';
       console.error("Error al guardar:", error);
-      alert(`Error al guardar: ${error.message}`);
+      alert(`Error al guardar: ${mensaje}`);
     } finally {
       setGuardando(false);
     }
@@ -347,7 +383,7 @@ export default function NuevoProspectoModal({ isOpen, onClose, onGuardado }: Pro
           {/* 🎯 SECCIÓN CLAVE: Decisión inicial al registrar */}
           <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 space-y-2">
             <span className="text-xs font-bold text-indigo-900 uppercase">🎯 Calificación del Primer Contacto</span>
-            <select value={estatusDecision} onChange={e => setEstatusDecision(e.target.value as any)}
+            <select value={estatusDecision} onChange={e => setEstatusDecision(e.target.value as 'Analizando' | 'Confirmado_SI' | 'No_Interesado')}
               className="w-full border border-indigo-300 p-2 rounded-lg bg-white text-xs font-bold text-slate-800">
               <option value="Analizando">⏳ Lo va a pensar / Consultará con su familia (Enviar a Agenda)</option>
               <option value="Confirmado_SI">⚡ ¡SÍ QUIERE INICIAR DE INMEDIATO! (Mover a Kanban)</option>

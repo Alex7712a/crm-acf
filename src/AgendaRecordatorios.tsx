@@ -1,14 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { supabase } from './supabase';
+import EditarEstadoModal from './EditarEstadoModal';
 
 interface Props {
   onAbrirProspecto: (prospecto: any) => void;
 }
 
+const ESTADOS_KANBAN = [
+  'Nuevos',
+  'Asesoria',
+  'Primer_Pago',
+  'Seguimiento',
+  'Cita_Cierre',
+  'Finalizado'
+];
+
 export default function AgendaRecordatorios({ onAbrirProspecto }: Props) {
   const [recordatorios, setRecordatorios] = useState<any[]>([]);
   const [cargando, setCargando] = useState(true);
   const [filtro, setFiltro] = useState<'todos' | 'hoy' | 'proximos'>('todos');
+
+  // Estados para abrir la bitácora aquí mismo y para activar directo en Kanban
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [prospectoSeleccionado, setProspectoSeleccionado] = useState<any | null>(null);
+  const [iniciandoId, setIniciandoId] = useState<string | null>(null);
 
   useEffect(() => {
     obtenerAgenda();
@@ -24,7 +39,7 @@ export default function AgendaRecordatorios({ onAbrirProspecto }: Props) {
     if (!error && prospectos) {
       const hoyObj = new Date();
       const hoyStr = hoyObj.toISOString().split('T')[0];
-      
+
       // Fecha de mañana para alertas anticipadas
       const mañanaObj = new Date();
       mañanaObj.setDate(mañanaObj.getDate() + 1);
@@ -34,17 +49,17 @@ export default function AgendaRecordatorios({ onAbrirProspecto }: Props) {
 
       prospectos.forEach((p) => {
         // Encontrar la última actividad registrada en la bitácora
-        const ultimaActividad = p.actividades && p.actividades.length > 0 
+        const ultimaActividad = p.actividades && p.actividades.length > 0
           ? p.actividades.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
           : null;
 
         let fechaAgenda = ultimaActividad?.proximo_recontacto || p.fecha_agenda;
         let esSugerido = false;
 
-        // Si no hay fecha programada, aplicamos regla de 2 a 3 semanas (14-21 días) por inactividad
+        // Si no hay fecha programada, aplicamos regla de 2 a 3 semanas (14 días) por inactividad
         if (!fechaAgenda && p.estado !== 'Finalizado') {
           const fechaBase = new Date(ultimaActividad?.fecha_interaccion || p.created_at || hoyStr);
-          fechaBase.setDate(fechaBase.getDate() + 14); // 2 semanas por defecto
+          fechaBase.setDate(fechaBase.getDate() + 14);
           fechaAgenda = fechaBase.toISOString().split('T')[0];
           esSugerido = true;
         }
@@ -52,7 +67,7 @@ export default function AgendaRecordatorios({ onAbrirProspecto }: Props) {
         if (fechaAgenda && p.estado !== 'Finalizado') {
           // Es urgente/vencido si la fecha es hoy, ya pasó, o es mañana (alerta anticipada de 1 día)
           const esUrgente = fechaAgenda <= mañanaStr;
-          
+
           listaAgenda.push({
             prospecto: p,
             fechaAgenda,
@@ -71,10 +86,34 @@ export default function AgendaRecordatorios({ onAbrirProspecto }: Props) {
     setCargando(false);
   };
 
-  const hoyStr = new Date().toISOString().split('T')[0];
+  const abrirBitacora = (prospecto: any) => {
+    setProspectoSeleccionado(prospecto);
+    setIsEditModalOpen(true);
+  };
+
+  const iniciarEnKanban = async (e: MouseEvent, prospecto: any) => {
+    e.stopPropagation();
+    try {
+      setIniciandoId(prospecto.id);
+      const { error } = await supabase
+        .from('prospectos')
+        .update({ estado: 'Nuevos' })
+        .eq('id', prospecto.id);
+
+      if (error) throw error;
+
+      // Te cambia directo al Tablero Kanban donde ya aparecerá en "Contactos / Informes"
+      onAbrirProspecto(prospecto);
+    } catch (error) {
+      console.error('Error al iniciar trámite en Kanban:', error);
+      alert('No se pudo pasar al Kanban. Revisa la conexión o permisos en Supabase.');
+    } finally {
+      setIniciandoId(null);
+    }
+  };
 
   const recordatoriosFiltrados = recordatorios.filter((item) => {
-    if (filtro === 'hoy') return item.esUrgente; // Incluye hoy, vencidos y aviso de mañana
+    if (filtro === 'hoy') return item.esUrgente;
     if (filtro === 'proximos') return !item.esUrgente;
     return true;
   });
@@ -82,7 +121,7 @@ export default function AgendaRecordatorios({ onAbrirProspecto }: Props) {
   return (
     <div className="p-8 w-full flex flex-col flex-1 bg-slate-50">
       
-      {/* Encabezado y Filtros alineados correctamente a la izquierda */}
+      {/* Encabezado y Filtros */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 pb-4 border-b border-slate-200">
         <div>
           <h1 className="text-2xl font-black text-[#00006a]">📅 Agenda de Recordatorios y Seguimientos</h1>
@@ -92,17 +131,17 @@ export default function AgendaRecordatorios({ onAbrirProspecto }: Props) {
         <div className="flex gap-2 bg-white p-1.5 rounded-xl border border-slate-200 shadow-xs">
           <button 
             onClick={() => setFiltro('todos')} 
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${filtro === 'todos' ? 'bg-[#00006a] text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${filtro === 'todos' ? 'bg-[#00006a] text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
             Todos ({recordatorios.length})
           </button>
           <button 
             onClick={() => setFiltro('hoy')} 
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${filtro === 'hoy' ? 'bg-red-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${filtro === 'hoy' ? 'bg-red-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
             🔴 Urgentes / Hoy / Mañana ({recordatorios.filter(r => r.esUrgente).length})
           </button>
           <button 
             onClick={() => setFiltro('proximos')} 
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${filtro === 'proximos' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${filtro === 'proximos' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
             📅 Próximos / Futuro ({recordatorios.filter(r => !r.esUrgente).length})
           </button>
         </div>
@@ -118,10 +157,12 @@ export default function AgendaRecordatorios({ onAbrirProspecto }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {recordatoriosFiltrados.map((item, idx) => {
             const p = item.prospecto;
+            const estaEnKanban = ESTADOS_KANBAN.includes(p.estado);
+
             return (
               <div 
-                key={idx}
-                onClick={() => onAbrirProspecto(p)}
+                key={p.id || idx}
+                onClick={() => abrirBitacora(p)}
                 className={`bg-white rounded-2xl p-6 border shadow-sm hover:shadow-md cursor-pointer transition-all flex flex-col justify-between ${
                   item.esUrgente ? 'border-red-300 bg-red-50/20' : 'border-slate-200'
                 }`}>
@@ -161,16 +202,55 @@ export default function AgendaRecordatorios({ onAbrirProspecto }: Props) {
                   </div>
                 </div>
 
-                <div className="mt-5 pt-3 border-t border-slate-100 flex justify-end">
-                  <span className="text-xs font-bold text-[#fa0101] hover:underline flex items-center gap-1">
+                <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                  {!estaEnKanban ? (
+                    <button
+                      type="button"
+                      disabled={iniciandoId === p.id}
+                      onClick={(e) => iniciarEnKanban(e, p)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer disabled:opacity-60"
+                    >
+                      {iniciandoId === p.id ? 'Iniciando...' : '▶ Iniciar ya en Kanban'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAbrirProspecto(p);
+                      }}
+                      className="text-xs font-bold text-[#00006a] hover:underline cursor-pointer"
+                    >
+                      Ver en Kanban
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      abrirBitacora(p);
+                    }}
+                    className="text-xs font-bold text-[#fa0101] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
                     Abrir Bitácora y Gestionar ➔
-                  </span>
+                  </button>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      <EditarEstadoModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        prospecto={prospectoSeleccionado}
+        onActualizado={() => {
+          setIsEditModalOpen(false);
+          obtenerAgenda();
+        }}
+      />
     </div>
   );
 }
